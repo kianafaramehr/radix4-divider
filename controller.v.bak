@@ -1,0 +1,120 @@
+
+
+module r4_div_controller (
+    input  wire       clk,
+    input  wire       rst,                
+    input  wire       start,
+    input  wire       is_8,     // Flag for 8-bit mode
+    input  wire       is_16,    // Flag for 16-bit mode
+    input  wire       is_32,    // Flag for 32-bit mode
+
+    output reg        load_D,
+    output reg        load_w,
+    output reg        sel2,
+    output reg        sel3,
+    output reg        OTFC_clr,
+    output reg        OTFC_en,
+    output reg        done
+);
+
+    localparam [1:0] 
+        IDLE   = 2'b00,
+        INIT   = 2'b01,
+        DIVIDE = 2'b10,
+        DONE   = 2'b11;
+
+    reg [1:0] current_state, next_state;
+
+    // Internal counter signals
+    reg        Counter_ld;
+    reg        Counter_en;
+    reg  [4:0] cnt_init_val;
+    wire [4:0] itr_cnt_out;
+    wire       iterations_eq_0;
+
+    // Multiplexer for dynamic counter initialization based on discrete flags
+    always @(is_8 or is_16 or is_32) begin
+        if (is_8) begin
+            cnt_init_val = 5'd4;  // 8-bit operands -> 4 iterations
+        end else if (is_16) begin
+            cnt_init_val = 5'd8;  // 16-bit operands -> 8 iterations
+        end else if (is_32) begin
+            cnt_init_val = 5'd16; // 32-bit operands -> 16 iterations
+        end else begin
+            cnt_init_val = 5'd16; // Default safe state
+        end
+    end
+
+    // Instantiating the down-counter
+    down_counter #(5) ITR_CNT (
+        .clk(clk),
+        .ld(Counter_ld),
+        .en(Counter_en),
+        .d_in(cnt_init_val),
+        .q(itr_cnt_out)
+    );
+
+    // End condition is reaching zero
+    assign iterations_eq_0 = (itr_cnt_out == 0);
+
+    always @(posedge clk) begin
+        if (rst) current_state <= IDLE;
+        else     current_state <= next_state;
+    end
+
+    always @(current_state or start or iterations_eq_0) begin
+        next_state = current_state; 
+        case (current_state)
+            IDLE:   if (start) next_state = INIT;
+            INIT:   next_state = DIVIDE;
+            DIVIDE: if (iterations_eq_0) next_state = DONE;
+            DONE:   if (!start) next_state = IDLE;
+            default: next_state = IDLE;
+        endcase
+    end
+
+    always @(current_state or iterations_eq_0) begin
+        load_D       = 1'b0;
+        load_w       = 1'b0;
+        sel2         = 1'b0;
+        sel3         = 1'b0;
+        Counter_ld   = 1'b0; 
+        Counter_en   = 1'b0;
+        OTFC_clr     = 1'b0;
+        OTFC_en      = 1'b0;
+        done         = 1'b0;
+
+        case (current_state)
+            IDLE: begin
+                // Waiting for start signal
+            end
+            
+            INIT: begin
+                load_D       = 1'b1;
+                load_w       = 1'b1;
+                sel2         = 1'b0; 
+                sel3         = 1'b0; 
+                Counter_ld   = 1'b1; // Load the initial value from MUX
+                OTFC_clr     = 1'b1;
+            end
+            
+            DIVIDE: begin
+                if (!iterations_eq_0) begin
+                    load_w     = 1'b1;
+                    sel2       = 1'b1; 
+                    sel3       = 1'b1; 
+                    Counter_en = 1'b1; // Count down
+                    OTFC_en    = 1'b1;
+                end
+            end
+            
+            DONE: begin
+                done = 1'b1;
+            end
+            
+            default: begin
+                // Defaults apply
+            end
+        endcase
+    end
+endmodule

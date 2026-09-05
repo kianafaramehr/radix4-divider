@@ -1,0 +1,102 @@
+module r4_div_datapath #(parameter WIDTH = 32) (
+    input  wire                 clk,
+    input  wire [WIDTH-1:0]     x_norm,      
+    input  wire [WIDTH-1:0]     y_norm,      
+
+    // Control Signals from FSM
+    input  wire                 ld_d,        
+    input  wire                 init_loop,   
+    input  wire                 en_regs,     
+    input  wire                 clr_otfc,    
+    input  wire                 en_otfc,     
+    input  wire                 ld_itr_cnt,  
+    input  wire                 dec_itr_cnt, 
+    
+    // Status Signal to FSM
+    output wire                 end_of_iterations,
+
+    // Primary Outputs
+    output wire [WIDTH-1:0]     q_out,       
+    output wire [WIDTH-1:0]     rem_out      
+);
+
+    localparam ITR_CNT_WIDTH = $clog2(WIDTH / 2);
+    localparam [ITR_CNT_WIDTH:0] INIT_VALUE = WIDTH / 2; 
+
+    // Internal Routing Wires (ALL WIDENED TO 35 BITS: WIDTH+2:0)
+    wire [WIDTH-1:0] reg_d_out;
+    wire [WIDTH+2:0] reg_wc_out, reg_ws_out;
+    wire [WIDTH+2:0] csa_wc_nxt, csa_ws_nxt;
+    wire [WIDTH+2:0] wc_mux_out, ws_mux_out;
+    
+    wire [2:0]       q_next;
+    wire [WIDTH+2:0] mux_3_out;
+    wire             rem_sign;
+    wire [WIDTH-1:0] otfc_q, otfc_qm;
+    wire [ITR_CNT_WIDTH:0] itr_cnt_out;
+
+    // 1. Divisor Register
+    register #(WIDTH) REG_D (.d_in(y_norm), .sclr(1'b0), .ld(ld_d), .clk(clk), .q(reg_d_out));
+
+    // 2. Loop Counter
+    counter #(ITR_CNT_WIDTH+1) ITR_CNT (.d_in(INIT_VALUE), .ld(ld_itr_cnt), .ce(dec_itr_cnt), .clk(clk), .q(itr_cnt_out));
+    assign end_of_iterations = ~|itr_cnt_out;
+
+    // 3. Initialization Multiplexers (Padded strictly to 35 bits)
+    mux_2_to_1 #(WIDTH+3) INIT_WC_MUX (.i0(csa_wc_nxt), .i1({(WIDTH+3){1'b0}}), .sel(init_loop), .y(wc_mux_out));
+    mux_2_to_1 #(WIDTH+3) INIT_WS_MUX (.i0(csa_ws_nxt), .i1({3'b000, x_norm}), .sel(init_loop), .y(ws_mux_out));
+
+    // 4. WC and WS Loop Registers (Widened to 35 bits)
+    register #(WIDTH+3) REG_WC (.d_in(wc_mux_out), .sclr(1'b0), .ld(en_regs), .clk(clk), .q(reg_wc_out));
+    register #(WIDTH+3) REG_WS (.d_in(ws_mux_out), .sclr(1'b0), .ld(en_regs), .clk(clk), .q(reg_ws_out));
+
+    // 5. Quotient Selection
+    // 5. Quotient Selection
+    // Calculate the 7-bit estimation (y_hat) by adding the top 7 bits of WC and WS
+    wire [6:0] y_hat;
+    assign y_hat = reg_wc_out[WIDTH : WIDTH-6] + reg_ws_out[WIDTH : WIDTH-6];
+
+    q_sel_structural Q_SEL (
+        .divisor_idx(reg_d_out[WIDTH-2 : WIDTH-4]), 
+        .y_hat(y_hat), 
+        .q_next(q_next)
+    );
+
+    // 6. Multiple Selection (0, Y, 2Y) (Padded strictly to 35 bits)
+    mux_3_to_1 #(WIDTH+3) MUX_3 (
+        .i0({(WIDTH+3){1'b0}}), 
+        .i1({3'b000, reg_d_out}), 
+        .i2({2'b00, reg_d_out, 1'b0}), 
+        .sel(q_next[1:0]), 
+        .y(mux_3_out)
+    );
+
+    // 7. Add/Sub and Carry-Save Addition (Grabbing updated bit range before the 2-bit shift)
+    add_sub_csa #(WIDTH+3) LOOP_ADDER (
+        .wc_in({reg_wc_out[WIDTH:0], 2'b00}), 
+        .ws_in({reg_ws_out[WIDTH:0], 2'b00}),
+        .mux_in(mux_3_out), 
+        .op_sign(~q_next[2]), 
+        .wc_out(csa_wc_nxt), 
+        .ws_out(csa_ws_nxt)
+    );
+
+    // 8. On-The-Fly Conversion
+    otfc_block #(WIDTH) OTFC (
+        .clk(clk), .clr(clr_otfc), .en(en_otfc), .q_next(q_next), 
+        .Q(otfc_q), .QM(otfc_qm)
+    );
+
+    // 9. Termination & Assimilation (Passing the full 35-bit wires)
+    termination_block #(WIDTH) TERMINATION (
+        .wc_final(reg_wc_out), 
+        .ws_final(reg_ws_out), 
+        .divisor(reg_d_out), 
+        .true_rem(rem_out), 
+        .rem_sign(rem_sign)
+    );
+
+    // Output Routing: Pick Q or QM based on remainder sign
+    assign q_out = rem_sign ? otfc_qm : otfc_q;
+
+endmodule

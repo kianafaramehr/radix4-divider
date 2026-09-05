@@ -1,0 +1,7 @@
+
+State Machine - |r4_div_top|r4_div_controller:CONTROLLER|current_state
+Name current_state.DONE current_state.DIVIDE current_state.INIT current_state.IDLE 
+current_state.IDLE 0 0 0 0 
+current_state.INIT 0 0 1 1 
+current_state.DIVIDE 0 1 0 1 
+current_state.DONE 1 0 0 1 
