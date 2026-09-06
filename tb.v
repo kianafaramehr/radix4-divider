@@ -13,8 +13,9 @@ module tb_r4_div_top;
     reg                 is_8;
     reg                 is_16;
     reg                 is_32;
-    reg  [WIDTH-1:0]    x_norm;
-    reg  [WIDTH-1:0]    y_norm;
+    // MODIFIED: Changed port names to match the updated hardware
+    reg  [WIDTH-1:0]    x_in; 
+    reg  [WIDTH-1:0]    y_in;
 
     // Outputs
     wire [WIDTH-1:0]    q_out;
@@ -39,8 +40,8 @@ module tb_r4_div_top;
         .is_8(is_8),
         .is_16(is_16),
         .is_32(is_32),
-        .x_norm(x_norm),
-        .y_norm(y_norm),
+        .x_in(x_in),   // MODIFIED
+        .y_in(y_in),   // MODIFIED
         .q_out(q_out),
         .rem_out(rem_out),
         .done(done)
@@ -67,7 +68,7 @@ module tb_r4_div_top;
             for (i = 0; i < NUM_TESTS; i = i + 1) begin
                 
                 // Parse the 128-bit line
-                {x_norm, y_norm, expected_q, expected_r} = test_memory[i];
+                {x_in, y_in, expected_q, expected_r} = test_memory[i]; // MODIFIED
                 
                 // Start Handshake
                 @(posedge clk);
@@ -85,7 +86,7 @@ module tb_r4_div_top;
                     pass_count = pass_count + 1;
                 end else begin
                     fail_count = fail_count + 1;
-                    $display("FAIL [%0d-bit] at vector %0d: X = 0x%08h, Y = 0x%08h", mode, i, x_norm, y_norm);
+                    $display("FAIL [%0d-bit] at vector %0d: X = 0x%08h, Y = 0x%08h", mode, i, x_in, y_in); // MODIFIED
                     $display("  Expected: Q = 0x%08h, R = 0x%08h", expected_q, expected_r);
                     $display("  Got     : Q = 0x%08h, R = 0x%08h", q_out, rem_out);
                 end
@@ -109,8 +110,8 @@ module tb_r4_div_top;
         is_8   = 0;
         is_16  = 0;
         is_32  = 0;
-        x_norm = 0;
-        y_norm = 0;
+        x_in   = 0; // MODIFIED
+        y_in   = 0; // MODIFIED
 
         // Reset the UUT
         repeat (3) @(posedge clk);

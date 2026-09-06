@@ -1,9 +1,16 @@
+
+
 module r4_div_datapath #(parameter WIDTH = 32) (
     input  wire                 clk,
-    input  wire [WIDTH-1:0]     x_norm,      
-    input  wire [WIDTH-1:0]     y_norm,      
+    input  wire                 rst,         
+    
+    // Raw Inputs
+    input  wire [WIDTH-1:0]     x_in,      // Assumed to already meet the condition
+    input  wire [WIDTH-1:0]     y_in,      
 
-    // Control signals
+    // Control signals from Controller
+    input  wire                 ld,          
+    input  wire                 sh_en,       
     input  wire                 load_D,        
     input  wire                 load_w,     
     input  wire                 sel2,
@@ -11,10 +18,48 @@ module r4_div_datapath #(parameter WIDTH = 32) (
     input  wire                 OTFC_clr,    
     input  wire                 OTFC_en,     
 
+    // Outputs to Controller
+    output wire                 find,        
+
     // Primary outputs
     output wire [WIDTH-1:0]     q_out,       
     output wire [WIDTH-1:0]     rem_out      
 );
+
+    // =====================================================================
+    // 1. PRE-PROCESSING UNIT (Normalization for Y ONLY)
+    // =====================================================================
+    
+    wire [WIDTH-1:0] y_norm;
+    wire [WIDTH-1:0] y_coarse;
+    wire [1:0]       pos;
+    wire [1:0]       fine_shift_amt;
+
+    // Coarse Shift Register for Y (4-bit jumps)
+    divisor_shift_register #(WIDTH) Y_COARSE_REG (
+        .clk(clk), .rst(rst), .ld(ld), .shift_en_4(sh_en),
+        .d_in(y_in), .q(y_coarse)
+    );
+
+    // 4-bit Priority Encoder (Wired to top 4 bits of Y)
+    pe_4bit ENCODER (
+        .in(y_coarse[WIDTH-1 : WIDTH-4]), 
+        .pos(pos), 
+        .find(find)
+    );
+
+    // NOT logic for fine shift calculation
+    assign fine_shift_amt = ~pos;
+
+    // Fine Shifter for Y (0 to 3 bit shifts)
+    fine_shifter_0_to_3 Y_FINE_SHIFTER (
+        .d_in(y_coarse), .shift_amt(fine_shift_amt), .d_out(y_norm)
+    );
+
+
+    // =====================================================================
+    // 2. RADIX-4 SRT DIVISION DATAPATH
+    // =====================================================================
 
     wire [WIDTH-1:0] reg_d_out;
     wire [WIDTH+2:0] reg_wc_out, reg_ws_out;
@@ -26,6 +71,7 @@ module r4_div_datapath #(parameter WIDTH = 32) (
     wire             rem_sign;
     wire [WIDTH-1:0] otfc_q, otfc_qm;
 
+    // D Register takes the normalized Y
     register #(WIDTH) REG_D (
         .d_in(y_norm), .sclr(1'b0), .ld(load_D), .clk(clk), .q(reg_d_out)
     );
@@ -33,8 +79,10 @@ module r4_div_datapath #(parameter WIDTH = 32) (
     mux_2_to_1 #(WIDTH+3) INIT_WC_MUX (
         .i0({(WIDTH+3){1'b0}}), .i1(csa_wc_nxt), .sel(sel2), .y(wc_mux_out)
     );
+    
+    // WS MUX takes the RAW x_in directly (assuming it's already conditioned)
     mux_2_to_1 #(WIDTH+3) INIT_WS_MUX (
-        .i0({3'b000, x_norm}), .i1(csa_ws_nxt), .sel(sel3), .y(ws_mux_out)
+        .i0({3'b000, x_in}), .i1(csa_ws_nxt), .sel(sel3), .y(ws_mux_out)
     );
 
     register #(WIDTH+3) REG_WC (
@@ -85,4 +133,5 @@ module r4_div_datapath #(parameter WIDTH = 32) (
     );
 
     assign q_out = rem_sign ? otfc_qm : otfc_q;
+
 endmodule

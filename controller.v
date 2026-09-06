@@ -1,14 +1,16 @@
-
 module r4_div_controller (
     input  wire       clk,
     input  wire       rst,                
     input  wire       start,
-    input  wire       is_8,     // Flag for 8-bit mode
-    input  wire       is_16,    // Flag for 16-bit mode
-    input  wire       is_32,    // Flag for 32-bit mode
+    input  wire       is_8,         // Flag for 8-bit mode
+    input  wire       is_16,        // Flag for 16-bit mode
+    input  wire       is_32,        // Flag for 32-bit mode
+    input  wire       find,         // '1' when leading '1' is found in top 4 bits
 
-    output reg        load_D,
-    output reg        load_w,
+    output reg        ld,           
+    output reg        shift_en_4,   // Enable coarse 4-bit shift in preprocessor
+    output reg        load_D,       // Load normalized Divisor into main SRT datapath
+    output reg        load_w,       // Load normalized Dividend into main SRT datapath
     output reg        sel2,
     output reg        sel3,
     output reg        OTFC_clr,
@@ -16,24 +18,26 @@ module r4_div_controller (
     output reg        done
 );
 
-    localparam [1:0] 
-        IDLE   = 2'b00,
-        INIT   = 2'b01,
-        DIVIDE = 2'b10,
-        DONE   = 2'b11;
+    // Upgraded from 2-bit to 3-bit state encoding to fit new states
+    localparam [2:0] 
+        IDLE       = 3'b000,
+        INIT       = 3'b001,
+        PREPROCESS = 3'b010,    
+        LOAD_NORM  = 3'b011,    
+        DIVIDE     = 3'b100,
+        DONE       = 3'b101;
 
-    reg [1:0] current_state, next_state;
+    reg [2:0] current_state, next_state;
 
-    // Internal counter signals
+    // Internal counter signals for division iterations 
     reg        Counter_ld;
     reg        Counter_en;
     reg  [4:0] cnt_init_val;
     wire [4:0] itr_cnt_out;
     wire       iterations_eq_0;
 
-    // Multiplexer for dynamic counter initialization using concatenated flags
+    // Multiplexer for dynamic iteration counter initialization
     always @(is_8 or is_16 or is_32) begin
-        // Group the three separate signals into a single 3-bit vector
         case ({is_8, is_16, is_32})
             3'b100:  cnt_init_val = 5'd4;  // 8-bit operands -> 4 iterations
             3'b010:  cnt_init_val = 5'd8;  // 16-bit operands -> 8 iterations
@@ -42,7 +46,7 @@ module r4_div_controller (
         endcase
     end
 
-    // Instantiating the down-counter
+    // Instantiating the down-counter for division iterations
     down_counter #(5) ITR_CNT (
         .clk(clk),
         .ld(Counter_ld),
@@ -54,23 +58,31 @@ module r4_div_controller (
     // End condition is reaching zero
     assign iterations_eq_0 = (itr_cnt_out == 0);
 
+    // State Register
     always @(posedge clk) begin
         if (rst) current_state <= IDLE;
         else     current_state <= next_state;
     end
 
-    always @(current_state or start or iterations_eq_0) begin
+    // Next State Logic (Explicit Sensitivity List)
+    always @(current_state or start or find or iterations_eq_0) begin
         next_state = current_state; 
         case (current_state)
-            IDLE:   if (start) next_state = INIT;
-            INIT:   next_state = DIVIDE;
-            DIVIDE: if (iterations_eq_0) next_state = DONE;
-            DONE:   if (!start) next_state = IDLE;
-            default: next_state = IDLE;
+            IDLE:       if (start) next_state = INIT;
+            INIT:       next_state = PREPROCESS;
+            PREPROCESS: if (find)  next_state = LOAD_NORM; 
+            LOAD_NORM:  next_state = DIVIDE;
+            DIVIDE:     if (iterations_eq_0) next_state = DONE;
+            DONE:       if (!start) next_state = IDLE;
+            default:    next_state = IDLE;
         endcase
     end
 
-    always @(current_state or iterations_eq_0) begin
+    // Output Logic (Explicit Sensitivity List)
+    always @(current_state or find or iterations_eq_0) begin
+        // Default assignments to prevent latches
+        ld           = 1'b0; 
+        shift_en_4   = 1'b0;
         load_D       = 1'b0;
         load_w       = 1'b0;
         sel2         = 1'b0;
@@ -87,21 +99,31 @@ module r4_div_controller (
             end
             
             INIT: begin
-                load_D       = 1'b1;
-                load_w       = 1'b1;
+                ld           = 1'b1; // Load raw inputs into the shift registers
+                Counter_ld   = 1'b1; // Setup the division iteration counter early
+                OTFC_clr     = 1'b1; // Clear OTFC registers
+            end
+            
+            PREPROCESS: begin
+                if (!find) begin
+                    shift_en_4 = 1'b1; // Shift both X and Y by 4 bits until '1' is found
+                end
+            end
+
+            LOAD_NORM: begin
+                load_D       = 1'b1; // Grab the normalized divisor
+                load_w       = 1'b1; // Grab the normalized dividend
                 sel2         = 1'b0; 
                 sel3         = 1'b0; 
-                Counter_ld   = 1'b1; // Load the initial value from MUX
-                OTFC_clr     = 1'b1;
             end
             
             DIVIDE: begin
                 if (!iterations_eq_0) begin
-                    load_w     = 1'b1;
-                    sel2       = 1'b1; 
-                    sel3       = 1'b1; 
-                    Counter_en = 1'b1; // Count down
-                    OTFC_en    = 1'b1;
+                    load_w     = 1'b1; // Load feedback residual
+                    sel2       = 1'b1; // MUX select for residual feedback
+                    sel3       = 1'b1; // MUX select for residual feedback
+                    Counter_en = 1'b1; // Decrement iteration counter
+                    OTFC_en    = 1'b1; // Enable quotient conversion
                 end
             end
             
