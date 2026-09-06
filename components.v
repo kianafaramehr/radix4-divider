@@ -277,3 +277,61 @@ module otfc_block #(parameter WIDTH = 32) (
         end
     end
 endmodule
+
+
+module pe_4bit (
+    input  wire [3:0] in,
+    output reg  [1:0] pos,
+    output wire       find
+);
+
+    // The flag goes high if there is at least one '1' in this 4-bit chunk
+    assign find = |in; 
+
+    // Look for the first '1' starting from the MSB (bit 3) down to LSB (bit 0)
+    always @(*) begin
+        if      (in[3]) pos = 2'b11; 
+        else if (in[2]) pos = 2'b10; 
+        else if (in[1]) pos = 2'b01; 
+        else            pos = 2'b00; 
+    end
+
+endmodule
+
+
+module fine_shifter_0_to_3 (
+    input  wire [31:0] d_in,
+    input  wire [1:0]  shift_amt,
+    output reg  [31:0] d_out
+);
+
+    // Only 4 possible shifts: 0, 1, 2, or 3 bit left shift
+    always @(*) begin
+        case (shift_amt)
+            2'b00: d_out = d_in;                               // Shift 0
+            2'b01: d_out = {d_in[30:0], 1'b0};                 // Shift 1
+            2'b10: d_out = {d_in[29:0], 2'b00};                // Shift 2
+            2'b11: d_out = {d_in[28:0], 3'b000};               // Shift 3
+        endcase
+    end
+
+endmodule
+
+module divisor_shift_register #(parameter WIDTH = 32) (
+    input  wire             clk,
+    input  wire             rst,
+    input  wire             ld,          
+    input  wire             shift_en_4,  
+    input  wire [WIDTH-1:0] d_in,
+    output reg  [WIDTH-1:0] q
+);
+    always @(posedge clk) begin
+        if (rst) begin
+            q <= 0;
+        end else if (ld) begin
+            q <= d_in;
+        end else if (shift_en_4) begin
+            q <= {q[WIDTH-5:0], 4'b0000}; 
+        end
+    end
+endmodule
