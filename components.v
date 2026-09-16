@@ -195,37 +195,36 @@ module add_sub_csa #(parameter WIDTH = 32) (
 endmodule
 
 module termination_block #(parameter WIDTH = 32) (
-    input  wire [WIDTH+2:0] wc_final,
-    input  wire [WIDTH+2:0] ws_final,
-    input  wire [WIDTH-1:0] divisor,
-    output wire [WIDTH-1:0] true_rem,
+    input  wire [WIDTH+5:0] wc_final,
+    input  wire [WIDTH+5:0] ws_final,
+    input  wire [WIDTH+5:0] divisor_aligned,
+    output wire [WIDTH+5:0] true_rem,
     output wire             rem_sign
 );
-    wire [WIDTH+2:0] raw_rem_35;
+    wire [WIDTH+5:0] raw_rem_38;
     
-    adder #(WIDTH+3) assimilation_cpa (
+    adder #(WIDTH+6) assimilation_cpa (
         .a(wc_final),
         .b(ws_final),
         .ci(1'b0),
         .co(),
-        .s(raw_rem_35)
+        .s(raw_rem_38)
     );
 
-    assign rem_sign = raw_rem_35[WIDTH+2];
+    assign rem_sign = raw_rem_38[WIDTH+5];
 
-    wire [WIDTH-1:0] restored_rem;
+    wire [WIDTH+5:0] restored_rem;
     
-    adder #(WIDTH) correction_adder (
-        .a(raw_rem_35[WIDTH-1:0]),
-        .b(divisor),
+    adder #(WIDTH+6) correction_adder (
+        .a(raw_rem_38),
+        .b(divisor_aligned),
         .ci(1'b0),
         .co(),
         .s(restored_rem)
     );
 
-    assign true_rem = (rem_sign) ? restored_rem : raw_rem_35[WIDTH-1:0];
+    assign true_rem = (rem_sign) ? restored_rem : raw_rem_38;
 endmodule
-
 module otfc_block #(parameter WIDTH = 32) (
     input  wire             clk,
     input  wire             clr,
@@ -334,4 +333,82 @@ module divisor_shift_register #(parameter WIDTH = 32) (
             q <= {q[WIDTH-5:0], 4'b0000}; 
         end
     end
+endmodule
+
+module remainder_shift_register #(parameter WIDTH = 32) (
+    input  wire             clk,
+    input  wire             rst,
+    input  wire             ld,
+    input  wire             en,
+    input  wire [WIDTH-1:0] d_in,
+    output reg  [WIDTH-1:0] q
+);
+    always @(posedge clk) begin
+        if (rst) begin
+            q <= 0;
+        end else if (ld) begin
+            q <= d_in;
+        end else if (en) begin
+            
+            q <= {4'b0000, q[WIDTH-1:4]}; 
+        end
+    end
+endmodule
+
+module mux_4_to_1 #(parameter WIDTH = 32) (
+    input  wire [WIDTH-1:0] i0,
+    input  wire [WIDTH-1:0] i1,
+    input  wire [WIDTH-1:0] i2,
+    input  wire [WIDTH-1:0] i3,
+    input  wire [1:0]       sel,
+    output wire [WIDTH-1:0] y
+);
+    assign y = (sel == 2'b11) ? i3 :
+               (sel == 2'b10) ? i2 :
+               (sel == 2'b01) ? i1 : i0;
+endmodule
+
+module sign_manager #(parameter WIDTH = 32) (
+    input  wire                 clk,
+    input  wire                 rst,
+    input  wire                 start,
+    
+    // Ports connected to top level (signed data)
+    input  wire [WIDTH-1:0]     x_in,
+    input  wire [WIDTH-1:0]     y_in,
+    output wire [WIDTH-1:0]     q_out,
+    output wire [WIDTH-1:0]     rem_out,
+    
+    // Ports connected to datapath (absolute/unsigned data)
+    output wire [WIDTH-1:0]     x_abs,
+    output wire [WIDTH-1:0]     y_abs,
+    input  wire [WIDTH-1:0]     core_q,
+    input  wire [WIDTH-1:0]     core_rem
+);
+
+    // 1. Detect sign and compute absolute values
+    wire x_is_neg = x_in[WIDTH-1];
+    wire y_is_neg = y_in[WIDTH-1];
+    
+    assign x_abs = x_is_neg ? (~x_in + 1'b1) : x_in;
+    assign y_abs = y_is_neg ? (~y_in + 1'b1) : y_in;
+
+    // 2. Store signs for final correction
+    reg final_q_sign;
+    reg final_r_sign;
+    
+    always @(posedge clk) begin
+        if (rst) begin
+            final_q_sign <= 1'b0;
+            final_r_sign <= 1'b0;
+        end else if (start) begin
+            final_q_sign <= x_is_neg ^ y_is_neg;
+            final_r_sign <= x_is_neg;
+        end
+    end
+
+    // 3. Apply signs to final outputs
+    assign q_out   = (final_q_sign && core_q != 0)   ? (~core_q + 1'b1)   : core_q;
+    assign rem_out = (final_r_sign && core_rem != 0) ? (~core_rem + 1'b1) : core_rem;
+
 endmodule
