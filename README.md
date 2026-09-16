@@ -20,7 +20,7 @@ A high-performance, structurally modeled 32-bit integer divider implementing the
     *   `r4_div_core`: The 38-bit Radix-4 SRT engine, featuring Quotient Selection Logic (`Q_SEL`) and OTFC.
     *   `r4_div_postprocess`: Re-aligns the remainder.
 *   `components.v`: Structural hardware primitives (Registers, Multiplexers, Adders, Shift Registers, Down Counters).
-*   `tb_r4_div_top.v`: The automated testbench for rigorous verification.
+*   `tb.v`: The automated testbench for rigorous verification.
 
 ## 🧠 Architecture Overview
 
