@@ -1,3 +1,55 @@
+// =====================================================================
+// MODULE: input_wrapper
+// DESCRIPTION: Structurally latches input values and signs from the processor 
+// bus using distinct 1-bit and 32-bit registers. Prepares absolute values.
+// =====================================================================
+module input_wrapper #(parameter WIDTH = 32) (
+    input  wire                 clk,
+    input  wire                 rst,
+    input  wire                 ld_in,
+    
+    input  wire [WIDTH-1:0]     x_in,
+    input  wire [WIDTH-1:0]     y_in,
+    
+    output wire [WIDTH-1:0]     x_abs,
+    output wire [WIDTH-1:0]     y_abs,
+    output wire                 final_q_sign,
+    output wire                 final_r_sign
+);
+
+    wire [WIDTH-1:0] x_reg;
+    wire [WIDTH-1:0] y_reg;
+    
+    // Structural instantiation for Dividend and Divisor
+    register #(WIDTH) REG_X (
+        .d_in(x_in), .sclr(rst), .ld(ld_in), .clk(clk), .q(x_reg)
+    );
+    
+    register #(WIDTH) REG_Y (
+        .d_in(y_in), .sclr(rst), .ld(ld_in), .clk(clk), .q(y_reg)
+    );
+
+    // Initial sign extraction
+    wire q_sign_raw = x_in[WIDTH-1] ^ y_in[WIDTH-1];
+    wire r_sign_raw = x_in[WIDTH-1];
+
+    // Structural instantiation for isolated Sign Bits
+    register #(1) REG_Q_SIGN (
+        .d_in(q_sign_raw), .sclr(rst), .ld(ld_in), .clk(clk), .q(final_q_sign)
+    );
+    
+    register #(1) REG_R_SIGN (
+        .d_in(r_sign_raw), .sclr(rst), .ld(ld_in), .clk(clk), .q(final_r_sign)
+    );
+
+    // Combinational block resolving absolute magnitudes
+    assign x_abs = x_reg[WIDTH-1] ? (~x_reg + 1'b1) : x_reg;
+    assign y_abs = y_reg[WIDTH-1] ? (~y_reg + 1'b1) : y_reg;
+
+endmodule
+
+// --- GENERIC COMPONENTS ---
+
 module register #(parameter WIDTH = 32) (
     input  wire [WIDTH-1:0] d_in,
     input  wire             sclr,
@@ -6,25 +58,21 @@ module register #(parameter WIDTH = 32) (
     output reg  [WIDTH-1:0] q
 );
     always @(posedge clk) begin
-        if (sclr)
-            q <= 0;
-        else if (ld)
-            q <= d_in;
+        if (sclr)      q <= 0;
+        else if (ld)   q <= d_in;
     end
 endmodule
 
 module down_counter #(parameter WIDTH = 5) (
     input  wire             clk,
-    input  wire             ld,     // Load enable
-    input  wire             en,     // Count down enable
-    input  wire [WIDTH-1:0] d_in,   // Dynamic initialization value
+    input  wire             ld,     
+    input  wire             en,     
+    input  wire [WIDTH-1:0] d_in,   
     output reg  [WIDTH-1:0] q
 );
     always @(posedge clk) begin
-        if (ld)
-            q <= d_in;
-        else if (en)
-            q <= q - 1;
+        if (ld)        q <= d_in;
+        else if (en)   q <= q - 1;
     end
 endmodule
 
@@ -48,32 +96,28 @@ module mux_3_to_1 #(parameter WIDTH = 32) (
                (sel == 2'b01) ? i1 : i0;
 endmodule
 
+// =====================================================================
+// MODULE: q_sel_structural
+// DESCRIPTION: Generates the next Radix-4 redundant quotient digit 
+// (-2, -1, 0, 1, 2) based on the residual and normalized divisor.
+// =====================================================================
 module q_sel_structural (
     input  wire [2:0] divisor_idx, 
     input  wire [6:0] y_hat,       
     output wire [2:0] q_next       
 );
-    // --- STAGE 1: SIGN SPLIT & INVERSION ---
-    // Declarations
     wire       is_neg;
     wire       is_pos;
     wire [5:0] w;
 
-    // Assignments
     assign is_neg = y_hat[6];
     assign is_pos = ~y_hat[6];
     assign w      = ~y_hat[5:0];
 
-    // --- STAGE 2: THRESHOLD GENERATION ---
-    // Declarations for Positive Thresholds
+    // Positive threshold boundaries
     wire p_geq_4, p_geq_6, p_geq_8, p_geq_12, p_geq_14;
     wire p_geq_15, p_geq_16, p_geq_18, p_geq_20, p_geq_24;
-
-    // Declarations for Negative Thresholds
-    wire n_leq_m5, n_leq_m7, n_leq_m9, n_leq_m14, n_leq_m16;
-    wire n_leq_m17, n_leq_m19, n_leq_m21, n_leq_m23, n_leq_m25;
-
-    // Assignments for Positive Thresholds
+    
     assign p_geq_4  = y_hat[5] | y_hat[4] | y_hat[3] | y_hat[2];
     assign p_geq_6  = y_hat[5] | y_hat[4] | y_hat[3] | (y_hat[2] & y_hat[1]);
     assign p_geq_8  = y_hat[5] | y_hat[4] | y_hat[3];
@@ -85,7 +129,10 @@ module q_sel_structural (
     assign p_geq_20 = y_hat[5] | (y_hat[4] & (y_hat[3] | y_hat[2]));
     assign p_geq_24 = y_hat[5] | (y_hat[4] & y_hat[3]);
 
-    // Assignments for Negative Thresholds
+    // Negative threshold boundaries
+    wire n_leq_m5, n_leq_m7, n_leq_m9, n_leq_m14, n_leq_m16;
+    wire n_leq_m17, n_leq_m19, n_leq_m21, n_leq_m23, n_leq_m25;
+
     assign n_leq_m5  = w[5] | w[4] | w[3] | w[2];
     assign n_leq_m7  = w[5] | w[4] | w[3] | (w[2] & w[1]);
     assign n_leq_m9  = w[5] | w[4] | w[3];
@@ -97,7 +144,7 @@ module q_sel_structural (
     assign n_leq_m23 = w[5] | (w[4] & (w[3] | (w[2] & w[1])));
     assign n_leq_m25 = w[5] | (w[4] & w[3]);
 
-    // --- STAGE 3: PRIORITY DECODING PER BRANCH ---
+    // Priority Decoders logic mapping
     wire [2:0] b8, b9, b10, b11, b12, b13, b14, b15;
 
     assign b8[2] = is_neg;
@@ -132,7 +179,7 @@ module q_sel_structural (
     assign b15[1] = (is_pos & p_geq_24) | (is_neg & n_leq_m25);
     assign b15[0] = (is_pos & p_geq_8 & ~p_geq_24) | (is_neg & n_leq_m9 & ~n_leq_m25);
 
-    // --- STAGE 4: STATIC 8-TO-1 MUX ---
+    // Divisor segment multiplexer
     assign q_next = (divisor_idx == 3'b000) ? b8  :
                     (divisor_idx == 3'b001) ? b9  :
                     (divisor_idx == 3'b010) ? b10 :
@@ -141,6 +188,8 @@ module q_sel_structural (
                     (divisor_idx == 3'b101) ? b13 :
                     (divisor_idx == 3'b110) ? b14 : b15 ;
 endmodule
+
+// --- ARITHMETIC BLOCKS ---
 
 module adder #(parameter WIDTH = 32) (
     input  wire [WIDTH-1:0] a,
@@ -156,8 +205,8 @@ module csa #(parameter WIDTH = 32) (
     input  wire [WIDTH-1:0] a,
     input  wire [WIDTH-1:0] b,
     input  wire [WIDTH-1:0] c,
-    output wire [WIDTH-1:0] sv,
-    output wire [WIDTH-1:0] cv
+    output wire [WIDTH-1:0] sv, // Sum Vector
+    output wire [WIDTH-1:0] cv  // Carry Vector
 );
     assign sv = a ^ b ^ c;
     assign cv = ((a & b) | (a & c) | (b & c));
@@ -173,12 +222,11 @@ module add_sub_csa #(parameter WIDTH = 32) (
 );
     reg [WIDTH-1:0] operand;
 
-    // Explicit sensitivity list
     always @(op_sign or mux_in) begin
         if (op_sign == 1'b0) begin
             operand = mux_in;
         end else begin
-            operand = ~mux_in;
+            operand = ~mux_in; // 1's complement for subtraction
         end
     end
 
@@ -191,6 +239,7 @@ module add_sub_csa #(parameter WIDTH = 32) (
         .cv(csa_cv)     
     );
 
+    // Apply the structural LSB bit to the carry vector
     assign wc_out = {csa_cv[WIDTH-2:0], op_sign};
 endmodule
 
@@ -223,8 +272,10 @@ module termination_block #(parameter WIDTH = 32) (
         .s(restored_rem)
     );
 
+    // Final restorative selection for SRT remainder
     assign true_rem = (rem_sign) ? restored_rem : raw_rem_38;
 endmodule
+
 module otfc_block #(parameter WIDTH = 32) (
     input  wire             clk,
     input  wire             clr,
@@ -236,7 +287,6 @@ module otfc_block #(parameter WIDTH = 32) (
     reg [WIDTH-1:0] next_Q;
     reg [WIDTH-1:0] next_QM;
 
-    // Explicit sensitivity list
     always @(q_next or Q or QM) begin
         case (q_next)
             3'b010: begin 
@@ -277,43 +327,36 @@ module otfc_block #(parameter WIDTH = 32) (
     end
 endmodule
 
+// --- SHIFTERS & ENCODERS ---
 
 module pe_4bit (
     input  wire [3:0] in,
     output reg  [1:0] pos,
     output wire       find
 );
-
-    // The flag goes high if there is at least one '1' in this 4-bit chunk
     assign find = |in; 
 
-    // Look for the first '1' starting from the MSB (bit 3) down to LSB (bit 0)
     always @(*) begin
         if      (in[3]) pos = 2'b11; 
         else if (in[2]) pos = 2'b10; 
         else if (in[1]) pos = 2'b01; 
         else            pos = 2'b00; 
     end
-
 endmodule
-
 
 module fine_shifter_0_to_3 (
     input  wire [31:0] d_in,
     input  wire [1:0]  shift_amt,
     output reg  [31:0] d_out
 );
-
-    // Only 4 possible shifts: 0, 1, 2, or 3 bit left shift
     always @(*) begin
         case (shift_amt)
-            2'b00: d_out = d_in;                               // Shift 0
-            2'b01: d_out = {d_in[30:0], 1'b0};                 // Shift 1
-            2'b10: d_out = {d_in[29:0], 2'b00};                // Shift 2
-            2'b11: d_out = {d_in[28:0], 3'b000};               // Shift 3
+            2'b00: d_out = d_in;                               
+            2'b01: d_out = {d_in[30:0], 1'b0};                 
+            2'b10: d_out = {d_in[29:0], 2'b00};                
+            2'b11: d_out = {d_in[28:0], 3'b000};               
         endcase
     end
-
 endmodule
 
 module divisor_shift_register #(parameter WIDTH = 32) (
@@ -349,7 +392,6 @@ module remainder_shift_register #(parameter WIDTH = 32) (
         end else if (ld) begin
             q <= d_in;
         end else if (en) begin
-            
             q <= {4'b0000, q[WIDTH-1:4]}; 
         end
     end
@@ -366,49 +408,4 @@ module mux_4_to_1 #(parameter WIDTH = 32) (
     assign y = (sel == 2'b11) ? i3 :
                (sel == 2'b10) ? i2 :
                (sel == 2'b01) ? i1 : i0;
-endmodule
-
-module sign_manager #(parameter WIDTH = 32) (
-    input  wire                 clk,
-    input  wire                 rst,
-    input  wire                 start,
-    
-    // Ports connected to top level (signed data)
-    input  wire [WIDTH-1:0]     x_in,
-    input  wire [WIDTH-1:0]     y_in,
-    output wire [WIDTH-1:0]     q_out,
-    output wire [WIDTH-1:0]     rem_out,
-    
-    // Ports connected to datapath (absolute/unsigned data)
-    output wire [WIDTH-1:0]     x_abs,
-    output wire [WIDTH-1:0]     y_abs,
-    input  wire [WIDTH-1:0]     core_q,
-    input  wire [WIDTH-1:0]     core_rem
-);
-
-    // 1. Detect sign and compute absolute values
-    wire x_is_neg = x_in[WIDTH-1];
-    wire y_is_neg = y_in[WIDTH-1];
-    
-    assign x_abs = x_is_neg ? (~x_in + 1'b1) : x_in;
-    assign y_abs = y_is_neg ? (~y_in + 1'b1) : y_in;
-
-    // 2. Store signs for final correction
-    reg final_q_sign;
-    reg final_r_sign;
-    
-    always @(posedge clk) begin
-        if (rst) begin
-            final_q_sign <= 1'b0;
-            final_r_sign <= 1'b0;
-        end else if (start) begin
-            final_q_sign <= x_is_neg ^ y_is_neg;
-            final_r_sign <= x_is_neg;
-        end
-    end
-
-    // 3. Apply signs to final outputs
-    assign q_out   = (final_q_sign && core_q != 0)   ? (~core_q + 1'b1)   : core_q;
-    assign rem_out = (final_r_sign && core_rem != 0) ? (~core_rem + 1'b1) : core_rem;
-
 endmodule
