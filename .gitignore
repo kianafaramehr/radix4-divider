@@ -1,22 +1,17 @@
-# Simulation artifacts & databases
-work/
-transcript
-*.wlf
-*.vcd
-*.log
-*.jou
+# Editor backup files
+*.bak
+*~
 
-# Synthesis & EDA temporary files
-*.eda.rpt
-*.map.*
-*.fit.*
-*.sof
-*.pof
+# ModelSim temporary logs & project files
+wlft*
+*.wlf
+*.cr.mti
+*.mpf
+transcript
+work/
+
+# Quartus synthesis output & workspaces
+output_files/
+*.qws
 db/
 incremental_db/
-
-# Editor / OS junk
-.DS_Store
-.vscode/
-*.swp
-*~
