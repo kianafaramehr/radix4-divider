@@ -1,0 +1,32 @@
+D:/Division/dividercodes/structural/datapath.v {1 {vlog -work work -stats=none D:/Division/dividercodes/structural/datapath.v
+Model Technology ModelSim - Intel FPGA Edition vlog 2020.1 Compiler 2020.02 Feb 28 2020
+-- Compiling module r4_div_preprocess
+-- Compiling module r4_div_core
+-- Compiling module r4_div_postprocess
+-- Compiling module r4_div_datapath
+
+Top level modules:
+	r4_div_datapath
+
+} {} {}} D:/Division/dividercodes/structural/controller.v {1 {vlog -work work -stats=none D:/Division/dividercodes/structural/controller.v
+Model Technology ModelSim - Intel FPGA Edition vlog 2020.1 Compiler 2020.02 Feb 28 2020
+-- Compiling module r4_div_controller
+
+Top level modules:
+	r4_div_controller
+
+} {} {}} D:/Division/dividercodes/structural/topmodule.v {1 {vlog -work work -stats=none D:/Division/dividercodes/structural/topmodule.v
+Model Technology ModelSim - Intel FPGA Edition vlog 2020.1 Compiler 2020.02 Feb 28 2020
+-- Compiling module r4_div_top
+
+Top level modules:
+	r4_div_top
+
+} {} {}} D:/Division/dividercodes/structural/tb.v {1 {vlog -work work -stats=none D:/Division/dividercodes/structural/tb.v
+Model Technology ModelSim - Intel FPGA Edition vlog 2020.1 Compiler 2020.02 Feb 28 2020
+-- Compiling module tb_r4_div_top
+
+Top level modules:
+	tb_r4_div_top
+
+} {} {}}

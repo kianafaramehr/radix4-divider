@@ -57,7 +57,8 @@ module register #(parameter WIDTH = 32) (
     input  wire             clk,
     output reg  [WIDTH-1:0] q
 );
-    always @(posedge clk) begin
+    // Asynchronous reset on sclr
+    always @(posedge clk or posedge sclr) begin
         if (sclr)      q <= 0;
         else if (ld)   q <= d_in;
     end
@@ -205,8 +206,8 @@ module csa #(parameter WIDTH = 32) (
     input  wire [WIDTH-1:0] a,
     input  wire [WIDTH-1:0] b,
     input  wire [WIDTH-1:0] c,
-    output wire [WIDTH-1:0] sv, // Sum Vector
-    output wire [WIDTH-1:0] cv  // Carry Vector
+    output wire [WIDTH-1:0] sv, 
+    output wire [WIDTH-1:0] cv  
 );
     assign sv = a ^ b ^ c;
     assign cv = ((a & b) | (a & c) | (b & c));
@@ -226,7 +227,7 @@ module add_sub_csa #(parameter WIDTH = 32) (
         if (op_sign == 1'b0) begin
             operand = mux_in;
         end else begin
-            operand = ~mux_in; // 1's complement for subtraction
+            operand = ~mux_in; 
         end
     end
 
@@ -239,7 +240,6 @@ module add_sub_csa #(parameter WIDTH = 32) (
         .cv(csa_cv)     
     );
 
-    // Apply the structural LSB bit to the carry vector
     assign wc_out = {csa_cv[WIDTH-2:0], op_sign};
 endmodule
 
@@ -272,7 +272,6 @@ module termination_block #(parameter WIDTH = 32) (
         .s(restored_rem)
     );
 
-    // Final restorative selection for SRT remainder
     assign true_rem = (rem_sign) ? restored_rem : raw_rem_38;
 endmodule
 
@@ -284,47 +283,48 @@ module otfc_block #(parameter WIDTH = 32) (
     output reg  [WIDTH-1:0] Q,
     output reg  [WIDTH-1:0] QM
 );
+
     reg [WIDTH-1:0] next_Q;
     reg [WIDTH-1:0] next_QM;
 
+    // Q Logic Path
     always @(q_next or Q or QM) begin
         case (q_next)
-            3'b010: begin 
-                next_Q  = {Q[WIDTH-3:0], 2'b10};
-                next_QM = {Q[WIDTH-3:0], 2'b01};
-            end
-            3'b001: begin 
-                next_Q  = {Q[WIDTH-3:0], 2'b01};
-                next_QM = {Q[WIDTH-3:0], 2'b00};
-            end
-            3'b000, 3'b100: begin 
-                next_Q  = {Q[WIDTH-3:0],  2'b00};
-                next_QM = {QM[WIDTH-3:0], 2'b11};
-            end
-            3'b101: begin 
-                next_Q  = {QM[WIDTH-3:0], 2'b11};
-                next_QM = {QM[WIDTH-3:0], 2'b10};
-            end
-            3'b110: begin 
-                next_Q  = {QM[WIDTH-3:0], 2'b10};
-                next_QM = {QM[WIDTH-3:0], 2'b01};
-            end
-            default: begin
-                next_Q  = Q;
-                next_QM = QM;
-            end
+            3'b010:          next_Q = {Q[WIDTH-3:0],  2'b10};
+            3'b001:          next_Q = {Q[WIDTH-3:0],  2'b01};
+            3'b000, 3'b100:  next_Q = {Q[WIDTH-3:0],  2'b00};
+            3'b101:          next_Q = {QM[WIDTH-3:0], 2'b11};
+            3'b110:          next_Q = {QM[WIDTH-3:0], 2'b10};
+            default:         next_Q = Q;
         endcase
     end
-
+    
     always @(posedge clk) begin
-        if (clr) begin
-            Q  <= 0;
-            QM <= 0;
-        end else if (en) begin
-            Q  <= next_Q;
-            QM <= next_QM;
-        end
+        if (clr)
+            Q <= {WIDTH{1'b0}};
+        else if (en)
+            Q <= next_Q;
     end
+    
+    // QM Logic Path
+    always @(q_next or Q or QM) begin
+        case (q_next)
+            3'b010:          next_QM = {Q[WIDTH-3:0],  2'b01};
+            3'b001:          next_QM = {Q[WIDTH-3:0],  2'b00};
+            3'b000, 3'b100:  next_QM = {QM[WIDTH-3:0], 2'b11};
+            3'b101:          next_QM = {QM[WIDTH-3:0], 2'b10};
+            3'b110:          next_QM = {QM[WIDTH-3:0], 2'b01};
+            default:         next_QM = QM;
+        endcase
+    end
+    
+    always @(posedge clk) begin
+        if (clr)
+            QM <= {WIDTH{1'b0}};
+        else if (en)
+            QM <= next_QM;
+    end
+
 endmodule
 
 // --- SHIFTERS & ENCODERS ---
@@ -336,7 +336,7 @@ module pe_4bit (
 );
     assign find = |in; 
 
-    always @(*) begin
+    always @(in) begin
         if      (in[3]) pos = 2'b11; 
         else if (in[2]) pos = 2'b10; 
         else if (in[1]) pos = 2'b01; 
@@ -349,12 +349,13 @@ module fine_shifter_0_to_3 (
     input  wire [1:0]  shift_amt,
     output reg  [31:0] d_out
 );
-    always @(*) begin
+    always @(d_in or shift_amt) begin
         case (shift_amt)
-            2'b00: d_out = d_in;                               
-            2'b01: d_out = {d_in[30:0], 1'b0};                 
-            2'b10: d_out = {d_in[29:0], 2'b00};                
-            2'b11: d_out = {d_in[28:0], 3'b000};               
+            2'b00:   d_out = d_in;                                
+            2'b01:   d_out = {d_in[30:0], 1'b0};                  
+            2'b10:   d_out = {d_in[29:0], 2'b00};                 
+            2'b11:   d_out = {d_in[28:0], 3'b000};                
+            default: d_out = d_in;
         endcase
     end
 endmodule
@@ -367,7 +368,7 @@ module divisor_shift_register #(parameter WIDTH = 32) (
     input  wire [WIDTH-1:0] d_in,
     output reg  [WIDTH-1:0] q
 );
-    always @(posedge clk) begin
+    always @(posedge clk or posedge rst) begin
         if (rst) begin
             q <= 0;
         end else if (ld) begin
@@ -386,7 +387,7 @@ module remainder_shift_register #(parameter WIDTH = 32) (
     input  wire [WIDTH-1:0] d_in,
     output reg  [WIDTH-1:0] q
 );
-    always @(posedge clk) begin
+    always @(posedge clk or posedge rst) begin
         if (rst) begin
             q <= 0;
         end else if (ld) begin

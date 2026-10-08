@@ -20,13 +20,12 @@ module r4_div_preprocess #(parameter WIDTH = 32) (
     wire [1:0]       fine_shift_amt;
     reg  [2:0]       coarse_cycles; 
 
-    // Divisor shift register for 4-bit chunk analysis
+    // Divisor shift register for 4-bit chunk analysis (Uses async reset internally)
     divisor_shift_register #(WIDTH) Y_COARSE_REG (
         .clk(clk), .rst(rst), .ld(ld), .shift_en_4(sh_en),
         .d_in(y_in), .q(y_coarse)
     );
 
-    // Priority encoder to locate the first '1' in a 4-bit chunk
     pe_4bit ENCODER (
         .in(y_coarse[WIDTH-1 : WIDTH-4]), 
         .pos(pos), 
@@ -35,7 +34,6 @@ module r4_div_preprocess #(parameter WIDTH = 32) (
 
     assign fine_shift_amt = ~pos;
 
-    // Combinational fine alignment
     fine_shifter_0_to_3 Y_FINE_SHIFTER (
         .d_in(y_coarse), .shift_amt(fine_shift_amt), .d_out(y_norm)
     );
@@ -48,13 +46,9 @@ module r4_div_preprocess #(parameter WIDTH = 32) (
         end
     end
 
-    // Total normalization shifts (coarse + fine)
     assign m_total = {coarse_cycles, fine_shift_amt};
-    
-    // Dynamic iteration calculation based on m_total
     assign n_iters = m_total[4:1] + m_total[0] + 1'b1;
 
-    // Shift Dividend (X) into 38-bit extended datapath
     wire s = m_total[0]; 
     mux_2_to_1 #(WIDTH+6) X_PREP_MUX (
         .i0({5'b00000, x_in, 1'b0}), 
@@ -66,8 +60,6 @@ endmodule
 
 // =====================================================================
 // MODULE: r4_div_core
-// DESCRIPTION: The main 38-bit Radix-4 SRT algorithmic core.
-// Uses Carry-Save Adders (CSA) and On-The-Fly Conversion (OTFC).
 // =====================================================================
 module r4_div_core #(parameter WIDTH = 32) (
     input  wire                 clk,
@@ -110,17 +102,14 @@ module r4_div_core #(parameter WIDTH = 32) (
         .d_in(ws_mux_out), .sclr(1'b0), .ld(load_w), .clk(clk), .q(reg_ws_out)
     );
 
-    // Truncated residual analysis window (7 MSB bits)
     wire [6:0] y_hat = reg_wc_out[35 : 29] + reg_ws_out[35 : 29];
 
-    // Quotient Selection Logic
     q_sel_structural Q_SEL (
         .divisor_idx(reg_d_out[WIDTH-2 : WIDTH-4]), 
         .y_hat(y_hat), 
         .q_next(q_next)
     );
 
-    // Divisor multiple generation
     wire [WIDTH+5:0] y_aligned = {3'b000, reg_d_out, 3'b000};
 
     mux_3_to_1 #(WIDTH+6) MUX_3 (
@@ -131,7 +120,6 @@ module r4_div_core #(parameter WIDTH = 32) (
         .y(mux_3_out)
     );
 
-    // Core arithmetic logic (CSA)
     add_sub_csa #(WIDTH+6) LOOP_ADDER (
         .wc_in({reg_wc_out[WIDTH+3:0], 2'b00}), 
         .ws_in({reg_ws_out[WIDTH+3:0], 2'b00}),
@@ -141,13 +129,11 @@ module r4_div_core #(parameter WIDTH = 32) (
         .ws_out(csa_ws_nxt)
     );
 
-    // On-The-Fly Conversion of redundant quotient digits
     otfc_block #(WIDTH) OTFC (
         .clk(clk), .clr(OTFC_clr), .en(OTFC_en), .q_next(q_next), 
         .Q(otfc_q), .QM(otfc_qm)
     );
     
-    // Assimilation of residual to form final remainder
     termination_block #(WIDTH) TERMINATION (
         .wc_final(reg_wc_out), 
         .ws_final(reg_ws_out), 
@@ -159,8 +145,6 @@ endmodule
 
 // =====================================================================
 // MODULE: r4_div_postprocess
-// DESCRIPTION: Realigns remainder using Coarse-Fine shift architecture
-// and applies final signs to output registers.
 // =====================================================================
 module r4_div_postprocess #(parameter WIDTH = 32) (
     input  wire                 clk,
@@ -169,8 +153,8 @@ module r4_div_postprocess #(parameter WIDTH = 32) (
     input  wire                 en_post,
     input  wire [4:0]           m_total,
     input  wire                 rem_sign,
-    input  wire                 final_q_sign, // Safely latched sign from wrapper
-    input  wire                 final_r_sign, // Safely latched sign from wrapper
+    input  wire                 final_q_sign, 
+    input  wire                 final_r_sign, 
     input  wire [WIDTH-1:0]     otfc_q,
     input  wire [WIDTH-1:0]     otfc_qm,
     input  wire [WIDTH+5:0]     raw_rem,
@@ -178,11 +162,9 @@ module r4_div_postprocess #(parameter WIDTH = 32) (
     output wire [WIDTH-1:0]     q_out,        
     output wire [WIDTH-1:0]     rem_out       
 );
-    // --- Quotient Resolution and Sign Application ---
     wire [WIDTH-1:0] raw_q = rem_sign ? otfc_qm : otfc_q;
     assign q_out = (final_q_sign && raw_q != 0) ? (~raw_q + 1'b1) : raw_q;
     
-    // --- Remainder Realignment ---
     wire [5:0] total_shift = {1'b0, m_total} + 6'd3; 
     wire [3:0] coarse_cnt_val = total_shift[5:2]; 
     wire [1:0] fine_shift_val = total_shift[1:0]; 
@@ -195,6 +177,7 @@ module r4_div_postprocess #(parameter WIDTH = 32) (
     assign post_coarse_zero = (post_counter_out == 4'd0);
     
     wire [WIDTH+5:0] sh_reg_out;
+    
     remainder_shift_register #(WIDTH+6) REM_SH_REG (
         .clk(clk), .rst(rst), .ld(load_post), .en(en_post),
         .d_in(raw_rem), .q(sh_reg_out)
@@ -210,7 +193,6 @@ module r4_div_postprocess #(parameter WIDTH = 32) (
         .y(fine_mux_out)
     );
 
-    // --- Remainder Sign Application ---
     wire [WIDTH-1:0] raw_rem_out = fine_mux_out[WIDTH-1:0];
     assign rem_out = (final_r_sign && raw_rem_out != 0) ? (~raw_rem_out + 1'b1) : raw_rem_out;
 
@@ -244,7 +226,6 @@ module r4_div_datapath #(parameter WIDTH = 32) (
     output wire [WIDTH-1:0]     q_out,       
     output wire [WIDTH-1:0]     rem_out      
 );
-    // Interconnect wires between datapath modules
     wire [4:0]       m_total;
     wire [WIDTH-1:0] y_norm;
     wire [WIDTH+5:0] x_shifted_wide;

@@ -52,13 +52,13 @@ module r4_div_controller (
     assign iterations_eq_0 = (itr_cnt_out == 0);
 
     // Sequential logic for state transitions
-    always @(posedge clk) begin
+    always @(posedge clk or posedge rst) begin
         if (rst) current_state <= IDLE;
         else     current_state <= next_state;
     end
 
-    // Combinational logic for next state logic
-    always @(*) begin
+    // Next-state logic
+    always @(current_state or start or find or iterations_eq_0 or post_coarse_zero) begin
         next_state = current_state; 
         case (current_state)
             IDLE:         if (start) next_state = LOAD_SIGN;
@@ -74,7 +74,7 @@ module r4_div_controller (
     end
 
     // Combinational logic for output signals
-    always @(*) begin
+    always @(current_state or find or iterations_eq_0 or post_coarse_zero) begin
         // Default assignments to prevent latches
         ld_in        = 1'b0; 
         ld           = 1'b0; 
@@ -95,7 +95,7 @@ module r4_div_controller (
             IDLE: begin end
             
             LOAD_SIGN: begin
-                ld_in = 1'b1; // Trigger structural input registers
+                ld_in = 1'b1; 
             end
 
             INIT: begin
@@ -123,7 +123,7 @@ module r4_div_controller (
                     Counter_en = 1'b1; 
                     OTFC_en    = 1'b1; 
                 end else begin
-                    load_post  = 1'b1; // Prepare post-processing shifts
+                    load_post  = 1'b1; 
                 end
             end
             
@@ -136,4 +136,5 @@ module r4_div_controller (
             end
         endcase
     end
+
 endmodule
