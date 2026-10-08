@@ -1,7 +1,22 @@
+# Simulation artifacts & databases
+work/
+transcript
+*.wlf
+*.vcd
+*.log
+*.jou
+
+# Synthesis & EDA temporary files
+*.eda.rpt
+*.map.*
+*.fit.*
+*.sof
+*.pof
 db/
 incremental_db/
-output_files/
-simulation/
-work/
-*.bak
-*.rpt
+
+# Editor / OS junk
+.DS_Store
+.vscode/
+*.swp
+*~
