@@ -28,8 +28,8 @@ module r4_div_controller (
     // FSM States
     localparam [2:0] 
         IDLE         = 3'b000,
-        LOAD_SIGN    = 3'b001,    
-        INIT         = 3'b010,
+        LOAD_INPUTS  = 3'b001,    
+        INIT_PREP    = 3'b010,
         PREPROCESS   = 3'b011,    
         LOAD_NORM    = 3'b100,    
         DIVIDE       = 3'b101,
@@ -51,7 +51,7 @@ module r4_div_controller (
 
     assign iterations_eq_0 = (itr_cnt_out == 0);
 
-    // Sequential logic for state transitions
+    // Sequential logic for state transitions (Asynchronous Reset)
     always @(posedge clk or posedge rst) begin
         if (rst) current_state <= IDLE;
         else     current_state <= next_state;
@@ -61,9 +61,9 @@ module r4_div_controller (
     always @(current_state or start or find or iterations_eq_0 or post_coarse_zero) begin
         next_state = current_state; 
         case (current_state)
-            IDLE:         if (start) next_state = LOAD_SIGN;
-            LOAD_SIGN:    next_state = INIT; 
-            INIT:         next_state = PREPROCESS;
+            IDLE:         if (start) next_state = LOAD_INPUTS;
+            LOAD_INPUTS:  next_state = INIT_PREP; 
+            INIT_PREP:    next_state = PREPROCESS;
             PREPROCESS:   if (find)  next_state = LOAD_NORM; 
             LOAD_NORM:    next_state = DIVIDE;
             DIVIDE:       if (iterations_eq_0) next_state = POST_PROCESS;
@@ -94,11 +94,11 @@ module r4_div_controller (
         case (current_state)
             IDLE: begin end
             
-            LOAD_SIGN: begin
+            LOAD_INPUTS: begin
                 ld_in = 1'b1; 
             end
 
-            INIT: begin
+            INIT_PREP: begin
                 ld           = 1'b1; 
                 OTFC_clr     = 1'b1; 
             end
